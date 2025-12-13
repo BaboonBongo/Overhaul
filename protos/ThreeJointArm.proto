@@ -1,0 +1,161 @@
+#VRML_SIM R2025a utf8
+
+PROTO ThreeJointArm [
+  field SFVec3f    translation     0 0 0
+  field SFRotation rotation        0 1 0 0
+  field SFString   name            "ThreeJointArm"
+  field SFString   controller      "ppo_controller"
+  field MFString   controllerArgs  []
+]
+{
+  Robot {
+    translation IS translation
+    rotation IS rotation
+    name IS name
+    controller IS controller
+    controllerArgs IS controllerArgs
+    supervisor TRUE
+    locked TRUE
+    children [
+      # Base Visual
+      Transform {
+        translation 0 0.05 0
+        children [
+          Shape {
+            appearance PBRAppearance { baseColor 0.1 0.1 0.1 roughness 0.5 metalness 0.5 }
+            geometry Cylinder { height 0.1 radius 0.12 }
+          }
+        ]
+      }
+      # Waist Joint
+      HingeJoint {
+        jointParameters HingeJointParameters {
+          axis 0 1 0
+          anchor 0 0.1 0
+        }
+        device [
+          RotationalMotor { name "joint1" maxVelocity 2.0 maxTorque 500 }
+          PositionSensor { name "sensor1" }
+        ]
+        endPoint Solid {
+          translation 0 0.1 0
+          name "link1"
+          children [
+            # Shoulder Hub
+            Shape {
+              appearance PBRAppearance { baseColor 0.5 0.5 0.5 }
+              geometry Sphere { radius 0.1 }
+            }
+            # Shoulder Joint (Axis Z)
+            HingeJoint {
+              jointParameters HingeJointParameters {
+                axis 0 0 1
+                anchor 0 0 0
+              }
+              device [
+                RotationalMotor { name "joint2" maxVelocity 2.0 maxTorque 1000 }
+                PositionSensor { name "sensor2" }
+              ]
+              endPoint Solid {
+                translation 0 0 0
+                name "link2"
+                children [
+                  # Upper Arm (Vertical)
+                  Transform {
+                    translation 0 0.3 0
+                    children [
+                      Shape {
+                        appearance PBRAppearance { baseColor 0.7 0.7 0.7 }
+                        geometry Box { size 0.08 0.6 0.08 }
+                      }
+                      # Joint Visual (Black Cylinder)
+                      Transform {
+                        translation 0 -0.3 0
+                        rotation 1 0 0 1.57
+                        children [ Shape { appearance PBRAppearance { baseColor 0.1 0.1 0.1 } geometry Cylinder { height 0.12 radius 0.06 } } ]
+                      }
+                    ]
+                  }
+                  # Elbow Joint (Axis Z)
+                  HingeJoint {
+                    jointParameters HingeJointParameters {
+                      axis 0 0 1
+                      anchor 0 0.6 0
+                    }
+                    device [
+                      RotationalMotor { name "joint3" maxVelocity 2.0 maxTorque 500 }
+                      PositionSensor { name "sensor3" }
+                    ]
+                    endPoint Solid {
+                      translation 0 0.6 0
+                      name "link3"
+                      children [
+                        # Forearm (Vertical)
+                        Transform {
+                          translation 0 0.25 0
+                          children [
+                            Shape {
+                              appearance PBRAppearance { baseColor 0.7 0.7 0.7 }
+                              geometry Box { size 0.06 0.5 0.06 }
+                            }
+                            # Joint Visual (Black Cylinder)
+                            Transform {
+                              translation 0 -0.25 0
+                              rotation 1 0 0 1.57
+                              children [ Shape { appearance PBRAppearance { baseColor 0.1 0.1 0.1 } geometry Cylinder { height 0.1 radius 0.05 } } ]
+                            }
+                          ]
+                        }
+                        # End Effector
+                        Transform {
+                          translation 0 0.5 0
+                          children [
+                            Shape {
+                              appearance PBRAppearance { baseColor 0.1 0.1 0.1 }
+                              geometry Box { size 0.05 0.05 0.05 }
+                            }
+                            Transform {
+                                translation 0 0.03 0
+                                children [
+                                    Shape { appearance PBRAppearance { baseColor 0.8 0.1 0.1 } geometry Sphere { radius 0.02 } } # Red Tip
+                                ]
+                            }
+                            GPS {
+                              translation 0 0.05 0
+                              name "gps"
+                            }
+                          ]
+                        }
+                      ]
+                      boundingObject Group {
+                        children [
+                          Transform { translation 0 0.25 0 children [ Box { size 0.06 0.5 0.06 } ] }
+                          Transform { translation 0 0.5 0 children [ Box { size 0.05 0.05 0.05 } ] }
+                        ]
+                      }
+                      physics Physics { density -1 mass 1 }
+                    }
+                  }
+                ]
+                # Upper Arm BO
+                boundingObject Transform {
+                  translation 0 0.3 0
+                  children [ Box { size 0.08 0.6 0.08 } ]
+                }
+                physics Physics { density -1 mass 2 }
+              }
+            }
+          ]
+          boundingObject Sphere { radius 0.1 }
+          physics Physics { density -1 mass 1 }
+        }
+      }
+    ]
+    # Base BO
+    boundingObject Transform {
+      translation 0 0.05 0
+      children [ Cylinder { height 0.1 radius 0.12 } ]
+    }
+
+  }
+}
