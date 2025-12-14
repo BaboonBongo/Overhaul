@@ -1,18 +1,18 @@
 # Dokumentasi Proyek Robot Lengan 3-Sendi dengan PPO (Reinforcement Learning)
 
-Dokumen ini menjelaskan struktur dan cara kerja dari simulasi robot lengan yang dilatih menggunakan algoritma **Proximal Policy Optimization (PPO)** untuk tugas memindahkan kotak ke target.
+Dokumentasi struktur dan cara kerja dari simulasi robot lengan yang dilatih menggunakan algoritma **Proximal Policy Optimization (PPO)** untuk tugas memindahkan kotak ke target.
 
 ## 📁 Struktur File & Komponen
 
 ### 1. World File (`worlds/NEW.wbt`)
-Ini adalah lingkungan simulasi utama di Webots.
+Lingkungan simulasi utama di Webots.
 - **Arena**: Lantai datar dengan tekstur papan catur dan langit biru.
 - **Robot**: Menggunakan referensi ke `ThreeJointArm.proto`. Ditempatkan di tengah (0, 0, 0).
 - **Objek Kotak (`DEF box`)**: Kotak merah yang harus dipindahkan oleh robot. Memiliki fisika (berat/massa) dan kecepatan linear yang dapat dilacak.
 - **Target (`DEF target`)**: Area persegi hijau di lantai yang menandakan tujuan akhir kotak.
 
 ### 2. PROTO File (`protos/ThreeJointArm.proto`)
-Ini adalah definisi blueprint dari robot lengan itu sendiri.
+Definisi blueprint dari robot lengan itu sendiri.
 - **Struktur**: Robot 3-DOF (Degree of Freedom) dengan 3 sendi putar (Revolute Joints):
   1.  **Waist (Joint1)**: Putaran horizontal dasar.
   2.  **Shoulder (Joint2)**: Anggukan bahu vertikal.
@@ -29,9 +29,9 @@ Otak utama robot yang mengimplementasikan algoritma PPO dengan PyTorch. Kode ini
 
 ---
 
-## 🧠 Penjelasan Reinforcement Learning (RL) - Update Terbaru
+## 🧠 Penjelasan Reinforcement Learning (RL)
 
-Kami telah memodifikasi sistem State dan Reward agar robot lebih cepat belajar memahami fisika dan momentum objek.
+Sistem State dan Reward telah diperkaya agar robot lebih cepat belajar memahami fisika dan momentum objek.
 
 ### 1. State Space (Ruang Keadaan - 18 Dimensi)
 Input yang diberikan ke otak robot (Neural Network) telah diperkaya dengan informasi kecepatan dan vektor relatif agar robot lebih paham "konteks" ruang.
@@ -52,7 +52,7 @@ Output kebijakan untuk menggerakkan motor.
 - **Mekanisme**: Robot mengontrol **Kecepatan Rotasi** setiap sendi, bukan posisi.
 
 ### 3. Reward Function (Fungsi Hadiah Berbasis Peningkatan)
-Kami mengubah sistem reward dari *Absolute Distance* menjadi **Delta/Improvement Reward**. Robot tidak dinilai berdasarkan "seberapa jauh dia sekarang", tapi "apakah dia bergerak mendekat atau menjauh dibanding langkah sebelumnya?".
+Sistem reward telah diubah dari *Absolute Distance* menjadi **Delta/Improvement Reward**. Robot tidak dinilai berdasarkan "seberapa jauh dia sekarang", tapi "apakah dia bergerak mendekat atau menjauh dibanding langkah sebelumnya?".
 
 Rumus Konsep:
 `Reward = (Jarak_Lama - Jarak_Baru) * Bobot`
@@ -69,7 +69,7 @@ Komponen Reward:
 
 ## ⚙️ Hyperparameter Training
 
-Berikut adalah konfigurasi parameter pelatihan yang digunakan untuk mencapai konvergensi dalam 1000 episode:
+Konfigurasi parameter pelatihan yang digunakan untuk mencapai konvergensi dalam 1000 episode:
 
 | Parameter | Nilai | Penjelasan |
 | :--- | :--- | :--- |
