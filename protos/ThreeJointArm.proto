@@ -34,7 +34,7 @@ PROTO ThreeJointArm [
           anchor 0 0.1 0
         }
         device [
-          RotationalMotor { name "joint1" maxVelocity 2.0 maxTorque 500 }
+          RotationalMotor { name "joint1" maxVelocity 3.5 maxTorque 500 }
           PositionSensor { name "sensor1" }
         ]
         endPoint Solid {
@@ -53,7 +53,7 @@ PROTO ThreeJointArm [
                 anchor 0 0 0
               }
               device [
-                RotationalMotor { name "joint2" maxVelocity 2.0 maxTorque 1000 }
+                RotationalMotor { name "joint2" maxVelocity 3.5 maxTorque 1000 }
                 PositionSensor { name "sensor2" }
               ]
               endPoint Solid {
@@ -83,7 +83,7 @@ PROTO ThreeJointArm [
                       anchor 0 0.6 0
                     }
                     device [
-                      RotationalMotor { name "joint3" maxVelocity 2.0 maxTorque 500 }
+                      RotationalMotor { name "joint3" maxVelocity 3.5 maxTorque 500 }
                       PositionSensor { name "sensor3" }
                     ]
                     endPoint Solid {

@@ -202,8 +202,6 @@ class RobotEnvironment:
         self.target_pos = [-0.5, 0.0, -0.5]
         
     def reset(self):
-        self.robot_node.setVelocity([0,0,0,0,0,0])
-        
         for motor in self.motors:
             motor.setPosition(float('inf'))
             motor.setVelocity(0.0)
@@ -217,32 +215,50 @@ class RobotEnvironment:
         for _ in range(10):
             self.supervisor.step(self.timestep)
             
+        # Initialize previous distances for Delta Reward
+        box_pos = self.box_node.getPosition()
+        ee_pos = self.gps.getValues()
+        self.prev_dist_ee_box = np.linalg.norm([e - b for e, b in zip(ee_pos, box_pos)])
+        self.prev_dist_box_tgt = np.linalg.norm([b - t for b, t in zip(box_pos, self.target_pos)])
+            
         return self.get_state()
         
     def get_state(self):
         # 1. Joint States
         joint_vals = [s.getValue() for s in self.sensors]
+        # velocity = (current - prev) / dt? 
+        # Better: webots motors don't easily give velocity feedback unless enabled.
+        # We can approximate or just trust the policy to infer from history (if we had LSTM).
+        # But let's assume position is main. 
+        # Actually enabling position sensors doesn't give velocity.
+        # Let's add explicit Box Linear Velocity to help it understand physics.
+        
         sin_q = np.sin(joint_vals)
         cos_q = np.cos(joint_vals)
         
         # 2. Positions
         box_pos = self.box_node.getPosition()
+        box_vel = self.box_node.getVelocity()[:3] # Linear velocity x,y,z
         ee_pos = self.gps.getValues()
         
-        # 3. Target Vector
-        rel_target = [t - b for t, b in zip(self.target_pos, box_pos)]
+        # Vector from EE to Box
+        vec_ee_box = [b - e for b, e in zip(box_pos, ee_pos)]
+        dist_ee_box = np.linalg.norm(vec_ee_box)
         
-        state = np.concatenate([sin_q, cos_q, box_pos, ee_pos, rel_target])
+        # Vector from Box to Target
+        vec_box_tgt = [t - b for t, b in zip(self.target_pos, box_pos)]
+        
+        # State Size: 3(sin) + 3(cos) + 3(ee_box) + 3(box_tgt) + 3(ee_pos) + 3(box_vel) = 18
+        state = np.concatenate([sin_q, cos_q, vec_ee_box, vec_box_tgt, ee_pos, box_vel])
         return np.array(state, dtype=np.float32)
 
     def step(self, action):
-        max_speed = 3.0 # Increase speed slightly
+        max_speed = 2.0 
         
         # Apply Actions
         for i, motor in enumerate(self.motors):
             vel = np.clip(action[i], -1, 1) * max_speed
             
-            # Simple Velocity Control
             if vel >= 0:
                 motor.setPosition(float('inf'))
                 motor.setVelocity(vel)
@@ -252,29 +268,40 @@ class RobotEnvironment:
                 
         self.supervisor.step(self.timestep)
         
-        # --- Simple Dense Reward (No Ambiguity) ---
+        # --- Rewards ---
         box_pos = self.box_node.getPosition()
         ee_pos = self.gps.getValues()
         
-        # Ranges: Distance ~ 0.5m - 1.0m
         dist_ee_box = np.linalg.norm([e - b for e, b in zip(ee_pos, box_pos)])
         dist_box_tgt = np.linalg.norm([b - t for b, t in zip(box_pos, self.target_pos)])
         
-        # Reward: Minimize these distances.
-        # Max penalty per step ~ -2.0. Min penalty ~ 0.
-        reward = -(dist_ee_box * 2.0) - (dist_box_tgt * 4.0)
+        # 1. Delta Rewards (The heavy lifters)
+        reward_reach = (self.prev_dist_ee_box - dist_ee_box) * 150.0 # Increased Weight
+        reward_push = (self.prev_dist_box_tgt - dist_box_tgt) * 250.0 # Increased Weight
+        
+        reward = reward_reach + reward_push
+        
+        # 2. Sparse "Touch" Bonus (Encourage contact)
+        if dist_ee_box < 0.15:
+            reward += 0.1 # Small constant bonus for staying close to box
+            
+        # 3. Reduced Time Penalty (Don't panic)
+        reward -= 0.01 
+        
+        self.prev_dist_ee_box = dist_ee_box
+        self.prev_dist_box_tgt = dist_box_tgt
         
         done = False
         
-        # Success Bonus
+        # Success Check
         if dist_box_tgt < 0.2:
-            reward += 200.0
+            reward += 100.0 # Massive Completion Bonus
             print("Target Reached! $$$")
             done = True
             
-        # Box Fell
+        # Failure Check
         if box_pos[1] < -0.1: 
-            reward -= 50.0
+            reward -= 10.0 # Reduced penalty to avoid fear of movement
             done = True
             
         return self.get_state(), reward, done, {}
@@ -282,30 +309,31 @@ class RobotEnvironment:
 # --- Main Training Loop ---
 
 def main():
-    print("Starting PPO Training (High Exploration Mode)...")
+    print("Starting PPO Training (Optimized Mode)...")
     env = RobotEnvironment()
-    # env.supervisor.simulationSetMode(env.supervisor.SIMULATION_MODE_FAST) # Wait for confirmation
+    # env.supervisor.simulationSetMode(env.supervisor.SIMULATION_MODE_FAST)
     
-    state_dim = env.state_dim
+    state_dim = 18 # Updated dim
     action_dim = env.action_dim
     
-    max_episodes = 2000
+    max_episodes = 1000 # Strict requirement
     max_timesteps = 500
-    update_timestep = 2000
+    update_timestep = 2000 
     
-    lr = 0.001       # Aggressive Learning Rate
+    lr = 0.0003      
     gamma = 0.99
-    K_epochs = 20
+    K_epochs = 10    
     eps_clip = 0.2
     
-    action_std = 1.0 # High Exploration Noise Start
+    action_std = 1.0 
     decay_rate = 0.05
-    min_action_std = 0.1
+    min_action_std = 0.3 
     
     ppo_agent = PPO(state_dim, action_dim, lr, lr, gamma, K_epochs, eps_clip, action_std)
     
     time_step = 0
     episode_rewards = []
+    episode_lengths = []
     
     for i_episode in range(1, max_episodes+1):
         state = env.reset()
@@ -327,8 +355,10 @@ def main():
             if done:
                 break
         
-        # Decay Action Std
-        if i_episode % 25 == 0:
+        episode_lengths.append(t + 1)
+        
+        # Slower Decay: Every 50 episodes instead of 25
+        if i_episode % 50 == 0:
             action_std = action_std - decay_rate
             action_std = round(max(action_std, min_action_std), 2)
             ppo_agent.set_action_std(action_std)
@@ -337,16 +367,33 @@ def main():
         
         if i_episode % 10 == 0:
             avg_rew = np.mean(episode_rewards[-10:])
-            print(f"Episode {i_episode} | Avg Reward: {avg_rew:.2f} | Std: {action_std}")
+            avg_len = np.mean(episode_lengths[-10:])
+            print(f"Episode {i_episode} | Avg Reward: {avg_rew:.2f} | Avg Steps: {avg_len:.1f} | Std: {action_std}")
             
         if i_episode % 100 == 0:
             ppo_agent.save(f"ppo_model_{i_episode}.pth")
 
     env.supervisor.simulationSetMode(env.supervisor.SIMULATION_MODE_REAL_TIME)
     
+    # 1. Episode Rewards Graph
+    plt.figure(figsize=(10, 5))
     plt.plot(episode_rewards)
-    plt.savefig("final_reward.png")
-    print("Training finished.")
+    plt.title("Episode Rewards")
+    plt.xlabel("Episode")
+    plt.ylabel("Reward")
+    plt.savefig("reward_graph.png")
+    plt.close()
+    
+    # 2. Episode Steps Graph
+    plt.figure(figsize=(10, 5))
+    plt.plot(episode_lengths)
+    plt.title("Episode Steps (Duration)")
+    plt.xlabel("Episode")
+    plt.ylabel("Steps")
+    plt.savefig("step_graph.png")
+    plt.close()
+    
+    print("Training finished. Graphs saved.")
 
 if __name__ == '__main__':
     main()

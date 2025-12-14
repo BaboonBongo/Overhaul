@@ -8,8 +8,8 @@ Dokumen ini menjelaskan struktur dan cara kerja dari simulasi robot lengan yang 
 Ini adalah lingkungan simulasi utama di Webots.
 - **Arena**: Lantai datar dengan tekstur papan catur dan langit biru.
 - **Robot**: Menggunakan referensi ke `ThreeJointArm.proto`. Ditempatkan di tengah (0, 0, 0).
-- **Objek Kotak (`DEF box`)**: Kotak merah yang harus dipindahkan oleh robot. Memiliki fisika (berat/massa).
-- **Target (`DEF target`)**: Area persegi hijau di lantai yang menandakan tujuan akhir kotak. Ini bersifat visual (sensorik) untuk robot.
+- **Objek Kotak (`DEF box`)**: Kotak merah yang harus dipindahkan oleh robot. Memiliki fisika (berat/massa) dan kecepatan linear yang dapat dilacak.
+- **Target (`DEF target`)**: Area persegi hijau di lantai yang menandakan tujuan akhir kotak.
 
 ### 2. PROTO File (`protos/ThreeJointArm.proto`)
 Ini adalah definisi blueprint dari robot lengan itu sendiri.
@@ -21,59 +21,68 @@ Ini adalah definisi blueprint dari robot lengan itu sendiri.
   - `PositionSensor` pada setiap sendi untuk mengetahui sudut kemiringan.
   - **GPS** pada ujung lengan (End-Effector) untuk mengetahui posisi tangan robot di ruang 3D (X, Y, Z).
 - **Fisika**:
-  - Base robot **terkunci mati (`locked TRUE`)** dan tidak memiliki node `Physics` di root, memastikan robot berdiri kokoh dan tidak goyang/jatuh.
-  - Komponen lengan (link) memiliki massa dan fisika agar bisa berinteraksi (mendorong) kotak.
+  - Base robot **terkunci mati (`locked TRUE`)**.
+  - Menggunakan kontrol berbasis Kecepatan (Velocity Control).
 
 ### 3. Controller (`controllers/ppo_controller/ppo_controller.py`)
-Ini adalah otak dari robot yang berisi implementasi algoritma PPO menggunakan PyTorch.
+Otak utama robot yang mengimplementasikan algoritma PPO dengan PyTorch. Kode ini telah dioptimalkan untuk mengatasi masalah "stagnasi" dalam pembelajaran.
 
 ---
 
-## 🧠 Penjelasan Reinforcement Learning (RL)
+## 🧠 Penjelasan Reinforcement Learning (RL) - Update Terbaru
 
-Agar robot dapat belajar, kita mendefinisikan 3 komponen utama RL: **State (Keadaan)**, **Action (Aksi)**, dan **Reward (Hadiah)**.
+Kami telah memodifikasi sistem State dan Reward agar robot lebih cepat belajar memahami fisika dan momentum objek.
 
-### 1. State Space (Ruang Keadaan - 15 Dimensi)
-Input yang diberikan ke otak robot (Neural Network) setiap langkah untuk "melihat" dunianya.
+### 1. State Space (Ruang Keadaan - 18 Dimensi)
+Input yang diberikan ke otak robot (Neural Network) telah diperkaya dengan informasi kecepatan dan vektor relatif agar robot lebih paham "konteks" ruang.
 
-| Indeks | Deskripsi | Penjelasan |
+| Indeks | Nama Fitur | Penjelasan |
 | :--- | :--- | :--- |
-| **0-2** | `Sin(Joint Angles)` | Nilai Sinus dari sudut ketiga sendi. |
-| **3-5** | `Cos(Joint Angles)` | Nilai Cosinus dari sudut ketiga sendi. Menggunakan Sin/Cos lebih baik daripada sudut mentah (derajat) agar NN mengerti kontinuitas putaran. |
-| **6-8** | `Box Position` | Posisi X, Y, Z dari kotak merah di dunia. |
-| **9-11** | `End-Effector POS` | Posisi X, Y, Z dari tangan robot (dari sensor GPS). Ini agar robot "sadar" posisi tangannya sendiri. |
-| **12-14** | `Target Vector` | Vektor jarak dari Kotak ke Target (`Target - Box`). Memberi tahu robot ke arah mana kotak harus didorong. |
+| **0-2** | `Sin(Joint)` | Representasi trigonometri sudut sendi (menghindari diskontinuitas sudut). |
+| **3-5** | `Cos(Joint)` | Representasi trigonometri sudut sendi. |
+| **6-8** | **Vektor EE ke Box** | Jarak relatif `(Box_Pos - Hand_Pos)`. Memberi tahu robot "di mana kotak itu relatif terhadap tangan saya". |
+| **9-11** | **Vektor Box ke Target** | Jarak relatif `(Target_Pos - Box_Pos)`. Memberi tahu robot "ke arah mana kotak harus didorong". |
+| **12-14** | `End-Effector POS` | Posisi absolut tangan robot (GPS). Penting agar robot tahu batas jangkauan fisiknya. |
+| **15-17** | **Kecepatan Linear Box** | `Box Velocity (Vx, Vy, Vz)`. **Sangat Penting**: Agar robot paham momentum (misal: "Jika saya pukul keras, dia meluncur"). |
 
 ### 2. Action Space (Ruang Aksi - 3 Dimensi)
-Output yang dihasilkan oleh otak robot untuk menggerakkan tubuhnya.
+Output kebijakan untuk menggerakkan motor.
+- **Tipe**: Kontinu (Continuous), Nilai -1.0 s/d 1.0.
+- **Mapping**: Dikalikan dengan `max_speed` (Saat ini diset ke **2.0 rad/s** agar pergerakan lebih terkontrol dan tidak "melempar" kotak terlalu jauh).
+- **Mekanisme**: Robot mengontrol **Kecepatan Rotasi** setiap sendi, bukan posisi.
 
-- Terdiri dari 3 nilai bilangan riil (float) antara **-1.0 sampai 1.0**.
-- Setiap nilai merepresentasikan **Target Kecepatan (Velocity)** untuk masing-masing motor (Joint1, Joint2, Joint3).
-- **Mekanisme**: Output dikalikan dengan `max_speed` (misal 3.0 rad/s).
-  - `-1.0`: Putar maksimal ke kiri/bawah.
-  - `0.0`: Diam.
-  - `1.0`: Putar maksimal ke kanan/atas.
+### 3. Reward Function (Fungsi Hadiah Berbasis Peningkatan)
+Kami mengubah sistem reward dari *Absolute Distance* menjadi **Delta/Improvement Reward**. Robot tidak dinilai berdasarkan "seberapa jauh dia sekarang", tapi "apakah dia bergerak mendekat atau menjauh dibanding langkah sebelumnya?".
 
-### 3. Reward Function (Fungsi Hadiah)
-Cara kita memberi tahu robot apakah ia melakukan hal yang benar atau salah. Kita menggunakan **Dense Distance Reward** (Hadiah Jarak Padat) agar robot cepat belajar.
+Rumus Konsep:
+`Reward = (Jarak_Lama - Jarak_Baru) * Bobot`
 
-Rumus Dasar:
-```python
-Reward = -(Jarak_Tangan_ke_Kotak * 2.0) - (Jarak_Kotak_ke_Target * 4.0)
-```
-
-**Penjelasan:**
-1.  **Semakin Dekat, Semakin Baik**: Karena nilai jarak adalah positif (misal 2 meter), kita memberinya tanda negatif (`-2`). Jika robot mendekat (jarak jadi 0.1 meter), nilainya menjadi `-0.1` (lebih besar dari -2). Robot selalu ingin memaksimalkan nilai ini mendekati 0.
-2.  **Prioritas Target**: Jarak Kotak-ke-Target dikalikan 4, sedangkan Tangan-ke-Kotak dikalikan 2. Ini berarti robot lebih "tergoda" untuk mendorong kotak ke target daripada sekadar menyentuh kotak.
-3.  **Bonus Sukses**: Jika kotak sampai di target (< 0.2m), robot dapat **+200 poin**.
-4.  **Hukuman Jatuh**: Jika kotak jatuh dari arena, robot dapat **-50 poin**.
+Komponen Reward:
+1.  **Reaching Reward (Bobot: 150.0)**: Diberikan positif jika tangan mendekati kotak.
+2.  **Pushing Reward (Bobot: 250.0)**: Diberikan positif jika kotak bergerak mendekati target. Bobot lebih besar karena ini tujuan utama.
+3.  **Touch Bonus (+0.1)**: Bonus kecil konstan jika tangan berada sangat dekat dengan kotak (< 15cm) untuk menjaga kontak ("menempel").
+4.  **Time Penalty (-0.01)**: Hukuman sangat kecil setiap langkah agar robot tidak malas, tapi cukup santai agar robot tidak panik/terburu-buru.
+5.  **Success Bonus (+100.0)**: Hadiah besar jika kotak mencapai target (< 20cm).
+6.  **Fail Penalty (-10.0)**: Hukuman jika kotak jatuh dari meja. Dikurangi agar robot tidak takut bereksperimen.
 
 ---
 
-## 🚀 Cara Kerja Training Loop
+## ⚙️ Hyperparameter Training
 
-1.  **Reset**: Setiap episode, posisi robot dan kotak direset.
-2.  **Exploration**: Di awal, robot akan bergerak acak (karena noise/entropy tinggi) untuk mencari tahu cara menggerakkan badannya.
-3.  **Collection**: Data pengalaman (State, Action, Reward) disimpan dalam memori buffer.
-4.  **Update (PPO)**: Setiap 2000 langkah (timestep), robot akan "berpikir" (training Neural Network) menggunakan data di buffer untuk memperbaiki kebijakannya.
-5.  **Iterasi**: Proses ini berulang ribuan kali hingga robot semakin pintar dan nilai Reward rata-rata meningkat (dari sangat negatif menjadi mendekati positif).
+Berikut adalah konfigurasi parameter pelatihan yang digunakan untuk mencapai konvergensi dalam 1000 episode:
+
+| Parameter | Nilai | Penjelasan |
+| :--- | :--- | :--- |
+| `max_episodes` | **1000** | Batas episode pelatihan (Requirement Project). |
+| `learning_rate` | **0.0003** | Pembelajaran lambat tapi stabil (Stable Baseline standar). Mencegah lupa kemampuan lama. |
+| `gamma` | **0.99** | Faktor diskon (Discount Factor). Robot peduli masa depan jangka panjang. |
+| `K_epochs` | **10** | Berapa kali data lama dilatih ulang (Replay). Dikurangi untuk mencegah overfitting pada noise. |
+| `eps_clip` | **0.2** | Batas perubahan kebijakan PPO agar tidak terlalu drastis. |
+| `action_std` | **1.0 -> 0.3** | Tingkat eksplorasi (noise). Dimulai tinggi (1.0) dan berkurang (Decay) setiap 50 episode, tapi dijaga minimal 0.3 agar robot tetap mau mencoba hal baru. |
+
+## 📊 Output
+Setelah pelatihan selesai, sistem akan menghasilkan dua grafik:
+1.  `reward_graph.png`: Grafik total reward per episode.
+2.  `step_graph.png`: Grafik durasi (jumlah langkah) per episode.
+
+File model akan disimpan secara berkala dengan nama `ppo_model_X.pth`.
